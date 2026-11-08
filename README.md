@@ -24,6 +24,7 @@ Deployed by [argocd-definitions](https://github.com/neboman11/argocd-definitions
 | `DCS_AUTO_UPDATE` | `false` | Run `DCS_updater.exe update` on every start |
 | `DCS_DESANITIZE` | empty | Lua modules to un-sanitize in `MissionScripting.lua` (e.g. `io lfs` for Liberation/DCC). Only run trusted missions. |
 | `DCS_SERVER_NAME` / `DCS_SERVER_PASSWORD` / `DCS_MAX_PLAYERS` | empty | Enforced into `serverSettings.lua` on start when set |
+| `DCS_WATCHDOG_MAX_FAILURES` | `8` | Consecutive missed or error WebGUI responses (15 s apart) before the server is restarted |
 | `BENCHMARK_MISSION` / `BENCHMARK_ROUNDS` / `BENCHMARK_RUNTIME` | `Benchmark_100_v2025.04.27.miz` / `3` / `180` | Benchmark mode parameters |
 
 Wine uses `/dev/ntsync` automatically when the device is present and writable in the

@@ -1,6 +1,8 @@
 #!/usr/bin/python3
 # Vendored from https://github.com/ActiumDev/dcs-server-wine (MIT, see /opt/dcs/LICENSE.ActiumDev).
-# Local change: resolve DCS_server.exe from $WINEPREFIX instead of ~/.wine.
+# Local changes: resolve DCS_server.exe from $WINEPREFIX instead of ~/.wine; count
+# error responses (e.g. 503 while a mission loads) as misses instead of terminating
+# immediately; configurable miss threshold (DCS_WATCHDOG_MAX_FAILURES, default 8).
 
 import asyncio
 import os
@@ -81,6 +83,7 @@ async def watchdog():
     # give server 2 minutes to come up
     await asyncio.sleep(120)
 
+    max_failures = int(os.getenv("DCS_WATCHDOG_MAX_FAILURES") or 8)
     num_failures = 0
     while True:
         await asyncio.sleep(15)
@@ -90,21 +93,18 @@ async def watchdog():
         if not path_vault.exists():
             continue
 
-        # query WebGUI
+        # query WebGUI; the server answers 503 while it is still loading a mission
         try:
             async with asyncio.timeout(10):
                 _ = await webgui_request()
                 num_failures = 0
-        except (ConnectionError, TimeoutError) as e:
+        except (ConnectionError, TimeoutError, RuntimeError,
+                asyncio.IncompleteReadError) as e:
             num_failures += 1
-            print(f"No response from server: {e!r}", flush=True)
+            print(f"No valid response from server ({num_failures}/{max_failures}): {e!r}", flush=True)
 
-        # break after 3 consecutive failures
-        if num_failures >= 3:
-            # raise an exception to terminate the watchdog and let systemd
-            # handle restarting
-            # TODO: implement in-process restart and cooldown logic
-            raise RuntimeError(f"Terminating after 3 missed responses.")
+        if num_failures >= max_failures:
+            raise RuntimeError(f"Terminating after {max_failures} missed responses.")
 
 async def run_server():
     proc = await asyncio.create_subprocess_exec("wine", str(path_wdir.parents[3] / "DCS_server/bin/DCS_server.exe"), "-w", writedir)
