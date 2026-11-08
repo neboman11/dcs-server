@@ -2,7 +2,8 @@
 # Vendored from https://github.com/ActiumDev/dcs-server-wine (MIT, see /opt/dcs/LICENSE.ActiumDev).
 # Local changes: resolve DCS_server.exe from $WINEPREFIX instead of ~/.wine; count
 # error responses (e.g. 503 while a mission loads) as misses instead of terminating
-# immediately; configurable miss threshold (DCS_WATCHDOG_MAX_FAILURES, default 8).
+# immediately; configurable miss threshold (DCS_WATCHDOG_MAX_FAILURES, default 8);
+# return as soon as DCS_server.exe exits instead of waiting for the watchdog to give up.
 
 import asyncio
 import os
@@ -109,14 +110,23 @@ async def watchdog():
 async def run_server():
     proc = await asyncio.create_subprocess_exec("wine", str(path_wdir.parents[3] / "DCS_server/bin/DCS_server.exe"), "-w", writedir)
 
-    # wait for server process to terminate (e.g., crash or Sim.exitProcess())
+    # wait for whichever comes first: server process exit (crash, Sim.exitProcess(),
+    # WM_CLOSE) or the watchdog giving up. upstream awaited both via gather(), so a
+    # dead server was only noticed after the watchdog ran out of misses.
+    proc_task = asyncio.ensure_future(proc.wait())
+    dog_task = asyncio.ensure_future(watchdog())
     try:
-        _ = await asyncio.gather(proc.wait(), watchdog())
-        # let wine reap all dependent processes (avoid systemd SIGKILL spree)
-        await asyncio.sleep(1)
-        return
+        done, _ = await asyncio.wait({proc_task, dog_task},
+                                     return_when=asyncio.FIRST_COMPLETED)
+        if proc_task in done:
+            dog_task.cancel()
+            print(f"DCS_server.exe exited with code {proc.returncode}", flush=True)
+            # let wine reap all dependent processes (avoid systemd SIGKILL spree)
+            await asyncio.sleep(1)
+            return
+        dog_task.result()
     except asyncio.CancelledError:
-        pass
+        dog_task.cancel()
     except RuntimeError as e:
         print(e, flush=True)
 
