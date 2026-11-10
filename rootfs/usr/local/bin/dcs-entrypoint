@@ -31,6 +31,7 @@ cleanup() {
     wait "$server_pid" 2>/dev/null || true
   fi
   wineserver -k 2>/dev/null || true
+  [[ $DCS_MODE == benchmark ]] && remove_benchmark_files
   kill "${pids[@]}" 2>/dev/null || true
   exit 0
 }
@@ -180,6 +181,7 @@ PY
 }
 
 run_server() {
+  remove_benchmark_files
   cd "$SRV"
   while true; do
     dcs-server-watchdog "$DCS_WRITEDIR" &
@@ -192,29 +194,43 @@ run_server() {
   done
 }
 
+remove_benchmark_files() {
+  # Benchmark.lua turns any start into a benchmark run while BENCHMARK_MISSION is set
+  rm -f "$CFG/$DCS_WRITEDIR/Scripts/Hooks/Benchmark.lua" "$CFG/$DCS_WRITEDIR"/Missions/Benchmark_*.miz
+}
+
 run_benchmark() {
-  ensure_writedir DCS.benchmark /opt/dcs/DCS_benchmark
-  # reuse the saved login of the main writedir
-  if [[ -f $CFG/$DCS_WRITEDIR/Config/network.vault ]]; then
-    cp "$CFG/$DCS_WRITEDIR/Config/network.vault" "$CFG/DCS.benchmark/Config/network.vault"
-  fi
-  export BENCHMARK_MISSION=${BENCHMARK_MISSION:-Benchmark_100_v2025.04.27.miz}
+  # Runs inside the server writedir: its saved login (network.vault) does not carry
+  # over to other writedirs. Missions run back to back, then the files are removed.
+  local w=$CFG/$DCS_WRITEDIR m
+  : "${BENCHMARK_MISSIONS:=Benchmark_100_v2025.04.27.miz Benchmark_150_v2024.11.23.miz Benchmark_200_v2024.11.23.miz}"
   export BENCHMARK_ROUNDS=${BENCHMARK_ROUNDS:-3}
   export BENCHMARK_RUNTIME=${BENCHMARK_RUNTIME:-180}
+  mkdir -p "$w/Scripts/Hooks" "$w/Missions"
+  cp /opt/dcs/DCS_benchmark/Scripts/Hooks/Benchmark.lua "$w/Scripts/Hooks/"
+  cp /opt/dcs/DCS_benchmark/Missions/Benchmark_*.miz "$w/Missions/"
   # shellcheck source=/dev/null
   OS_NAME="$(. /etc/os-release && echo "$PRETTY_NAME") (container)"
   OS_VERSION=$(uname -srv)
   WINE_VERSION=$(wine --version)
   CPU_NAME=$(grep -m1 '^model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^ //')
-  export OS_NAME OS_VERSION WINE_VERSION CPU_NAME
-  export PROC_PRIORITY="SCHED_OTHER nice=0" VIRTUALIZATION=container TACVIEW_ENABLE=0
-  log "benchmark: $BENCHMARK_MISSION, $BENCHMARK_ROUNDS x ${BENCHMARK_RUNTIME}s"
+  VIRTUALIZATION="container, cpus $(grep Cpus_allowed_list /proc/self/status | cut -f2)"
+  export OS_NAME OS_VERSION WINE_VERSION CPU_NAME VIRTUALIZATION
+  export PROC_PRIORITY="SCHED_OTHER nice=0" TACVIEW_ENABLE=0
+  [[ -f $w/Config/network.vault ]] || log "no saved login yet: log in once via noVNC to start the benchmark"
   cd "$SRV"
-  wine bin/DCS_server.exe -w DCS.benchmark &
-  server_pid=$!
-  wait "$server_pid" || true
-  server_pid=
-  log "benchmark finished; results in $CFG/DCS.benchmark/Logs/Benchmark-*.log"
+  for m in $BENCHMARK_MISSIONS; do
+    export BENCHMARK_MISSION=$m
+    log "benchmark: $m, $BENCHMARK_ROUNDS x ${BENCHMARK_RUNTIME}s"
+    wine bin/DCS_server.exe -w "$DCS_WRITEDIR" &
+    server_pid=$!
+    wait "$server_pid" || true
+    server_pid=
+    while pgrep -f '[D]CS_server.exe' >/dev/null; do sleep 5; done
+  done
+  unset BENCHMARK_MISSION
+  remove_benchmark_files
+  log "benchmark finished; results in $w/Logs/Benchmark-*.log"
   sleep infinity &
   wait $!
 }

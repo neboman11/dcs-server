@@ -19,13 +19,13 @@ Deployed by [argocd-definitions](https://github.com/neboman11/argocd-definitions
 | Variable | Default | Purpose |
 |---|---|---|
 | `VNC_PASSWORD` | required | noVNC/VNC password (port 6080) |
-| `DCS_MODE` | `server` | `server`, `benchmark` (ActiumDev benchmark missions), or `desktop` (display only) |
+| `DCS_MODE` | `server` | `server`, `benchmark` (ActiumDev benchmark missions in the server writedir), or `desktop` (display only) |
 | `DCS_TERRAINS` | `CAUCASUS_terrain` | Space-separated module IDs; missing ones are installed on start |
 | `DCS_AUTO_UPDATE` | `false` | Run `DCS_updater.exe update` on every start |
 | `DCS_DESANITIZE` | empty | Lua modules to un-sanitize in `MissionScripting.lua` (e.g. `io lfs` for Liberation/DCC). Only run trusted missions. |
 | `DCS_SERVER_NAME` / `DCS_SERVER_PASSWORD` / `DCS_MAX_PLAYERS` | empty | Enforced into `serverSettings.lua` on start when set |
 | `DCS_WATCHDOG_MAX_FAILURES` | `8` | Consecutive missed or error WebGUI responses (15 s apart) before the server is restarted |
-| `BENCHMARK_MISSION` / `BENCHMARK_ROUNDS` / `BENCHMARK_RUNTIME` | `Benchmark_100_v2025.04.27.miz` / `3` / `180` | Benchmark mode parameters |
+| `BENCHMARK_MISSIONS` / `BENCHMARK_ROUNDS` / `BENCHMARK_RUNTIME` | all three ActiumDev missions / `3` / `180` | Benchmark mode: missions (space-separated) run back to back inside the logged-in writedir, then the benchmark files are removed and the container idles |
 
 Wine uses `/dev/ntsync` automatically when the device is present and writable in the
 container; the entrypoint logs whether it is available.
