@@ -1,0 +1,160 @@
+#!/usr/bin/python3
+"""Config writers used by dcs-entrypoint.
+
+  dcs-config tacview <options.lua>   set plugins.Tacview in DCS options.lua from TACVIEW_* env
+  dcs-config dcssb <config dir>      write DCSServerBot YAML (as JSON, a YAML subset) from env
+"""
+import json
+import os
+import sys
+from pathlib import Path
+
+
+def env(name, default=""):
+    return os.environ.get(name, default)
+
+
+def env_bool(name, default="false"):
+    return env(name, default).lower() in ("1", "true", "yes")
+
+
+def lua_value(v):
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, (int, float)):
+        return str(v)
+    return '"' + str(v).replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def find_block(text, key, start=0):
+    """Return (begin, end) of `["key"] = { ... },` (end exclusive, after the comma) or None."""
+    marker = f'["{key}"] = {{'
+    i = text.find(marker, start)
+    if i < 0:
+        return None
+    depth, j, in_str = 0, i + len(marker) - 1, False
+    while j < len(text):
+        c = text[j]
+        if in_str:
+            if c == "\\":
+                j += 1
+            elif c == '"':
+                in_str = False
+        elif c == '"':
+            in_str = True
+        elif c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                end = j + 1
+                if text[end:end + 1] == ",":
+                    end += 1
+                return i, end
+        j += 1
+    raise ValueError(f"unbalanced block {key!r}")
+
+
+def tacview(path):
+    p = Path(path)
+    settings = {
+        "tacviewExportPath": "Tacview",  # relative to lfs.writedir()
+        "tacviewFlightDataRecordingEnabled": True,
+        "tacviewModuleEnabled": env_bool("TACVIEW_ENABLE"),
+        "tacviewMultiplayerFlightsAsHost": 2,
+        "tacviewPlaybackDelay": int(env("TACVIEW_PLAYBACK_DELAY", "0")),
+        "tacviewRealTimeTelemetryEnabled": env_bool("TACVIEW_REALTIME"),
+        "tacviewRealTimeTelemetryPassword": env("TACVIEW_REALTIME_PASSWORD"),
+        "tacviewRealTimeTelemetryPort": env("TACVIEW_REALTIME_PORT", "42674"),
+        "tacviewRemoteControlEnabled": False,
+        "tacviewRemoteControlPassword": "",
+        "tacviewRemoteControlPort": "42675",
+    }
+    body = "".join(f'\t\t\t["{k}"] = {lua_value(v)},\n' for k, v in settings.items())
+    block = f'["Tacview"] = {{\n{body}\t\t}},'
+    text = p.read_text(encoding="utf-8") if p.exists() else 'options = {\n}\n'
+    existing = find_block(text, "Tacview")
+    if existing:
+        text = text[:existing[0]] + block + text[existing[1]:]
+    else:
+        plugins = find_block(text, "plugins")
+        if plugins:
+            insert = text.index("{", plugins[0]) + 1
+            text = text[:insert] + "\n\t\t" + block + text[insert:]
+        else:
+            insert = text.index("{") + 1
+            text = text[:insert] + '\n\t["plugins"] = {\n\t\t' + block + "\n\t},\n" + text[insert:]
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(text, encoding="utf-8")
+
+
+def dump(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+def dcssb(config_dir):
+    cfg = Path(config_dir)
+    node = env("DCSSB_NODE", "dcs")
+    instance = env("DCS_WRITEDIR", "DCS.server")
+    server_name = env("DCS_SERVER_NAME") or "DCS Server"
+    db_url = env("DCSSB_DATABASE_URL")
+    if not db_url:
+        sys.exit("DCSSB_DATABASE_URL must be set")
+    channel = lambda name: int(env(f"DCSSB_CHANNEL_{name}", "-1") or -1)
+
+    dump(cfg / "main.yaml", {
+        "guild_id": int(env("DISCORD_GUILD_ID")),
+        "autoupdate": False,          # the image pins the bot version
+        "use_dashboard": False,       # no TTY in a container
+        "database": {"url": db_url},
+        "logging": {"loglevel": env("DCSSB_LOGLEVEL", "INFO")},
+    })
+    bot = {
+        "owner": int(env("DISCORD_OWNER_ID")),
+        "privileged_intents": True,
+        "roles": {"Admin": ["Admin"], "DCS Admin": ["DCS Admin"], "DCS": ["@everyone"]},
+    }
+    # The bot moves the token into config/.secret on first start and strips it from the YAML;
+    # re-adding it on every start keeps Vault the source of truth.
+    if env("DISCORD_TOKEN"):
+        bot["token"] = env("DISCORD_TOKEN")
+    if channel("ADMIN") != -1:
+        bot["channels"] = {"admin": channel("ADMIN")}
+    dump(cfg / "services" / "bot.yaml", bot)
+    dump(cfg / "nodes.yaml", {
+        node: {
+            "listen_address": "127.0.0.1",
+            "listen_port": 10042,
+            "use_upnp": False,
+            "nodestats": True,
+            "DCS": {
+                "installation": r"C:\DCS_server",
+                "autoupdate": False,  # updates run in a maintenance window (DCS_AUTO_UPDATE)
+                "desanitize": True,
+                "minimized": False,
+            },
+            "instances": {
+                instance: {
+                    "home": rf"C:\users\{env('USER', 'dcs')}\Saved Games\{instance}",
+                    "bot_port": 6666,
+                    "webgui_port": 8088,
+                    "dcs_port": 10308,
+                    "max_hung_minutes": 3,
+                },
+            },
+        },
+    })
+    dump(cfg / "servers.yaml", {
+        server_name: {
+            "channels": {"status": channel("STATUS"), "chat": channel("CHAT")},
+        },
+    })
+    # An all-day schedule makes the scheduler start DCS with the bot and keep it running.
+    dump(cfg / "plugins" / "scheduler.yaml", {instance: {"schedule": {"00-24": "YYYYYYY"}}})
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 3 or sys.argv[1] not in ("tacview", "dcssb"):
+        sys.exit(__doc__)
+    {"tacview": tacview, "dcssb": dcssb}[sys.argv[1]](sys.argv[2])

@@ -12,6 +12,9 @@ set -Eeuo pipefail
 : "${DCS_MAX_PLAYERS:=}"
 : "${VNC_PASSWORD:?VNC_PASSWORD must be set}"
 : "${SCREEN_GEOMETRY:=1280x800x24}"
+: "${TACVIEW_ENABLE:=false}"         # server-side Tacview recording (+ TACVIEW_REALTIME* for live telemetry)
+: "${SRS_ENABLE:=false}"             # SRS runs as a sidecar; this installs the in-game autoconnect hook
+: "${DCSSB_ENABLE:=false}"           # DCSServerBot (Wine Python) owns DCS start/stop instead of the watchdog
 
 DCS_UPDATER_URL=https://cdn.digitalcombatsimulator.com/files/DCS_updater_64bit.zip
 DRIVE_C=$WINEPREFIX/drive_c
@@ -23,8 +26,19 @@ server_pid=
 
 log() { printf '[dcs-entrypoint] %s\n' "$*"; }
 
+graceful_close_dcs() {
+  # same as the watchdog: WM_CLOSE runs DCS's own shutdown (mission end hooks, log flush)
+  local lock=$CFG/$DCS_WRITEDIR/dcs.lock pid
+  pid=$(cat "$lock" 2>/dev/null) || return 0
+  wine taskkill /pid "$pid" >/dev/null 2>&1 || return 0
+  for _ in $(seq 60); do pgrep -f '[D]CS_server.exe' >/dev/null || return 0; sleep 1; done
+}
+
 cleanup() {
   log "shutting down"
+  if [[ $DCSSB_ENABLE == true ]]; then
+    graceful_close_dcs
+  fi
   if [[ -n $server_pid ]] && kill -0 "$server_pid" 2>/dev/null; then
     # the watchdog closes DCS gracefully (WM_CLOSE) on SIGTERM
     kill -TERM "$server_pid" 2>/dev/null || true
@@ -199,6 +213,92 @@ remove_benchmark_files() {
   rm -f "$CFG/$DCS_WRITEDIR/Scripts/Hooks/Benchmark.lua" "$CFG/$DCS_WRITEDIR"/Missions/Benchmark_*.miz
 }
 
+install_tools() {
+  local w=$CFG/$DCS_WRITEDIR
+  mkdir -p "$w/Scripts/Hooks" "$w/Mods/Tech" "$w/Config"
+  # Export.lua only pcall()s Tacview's exporter, so it is harmless while Tacview is off
+  [[ -f $w/Scripts/Export.lua ]] || cp /opt/dcs/hooks/Export.lua "$w/Scripts/Export.lua"
+  if [[ $TACVIEW_ENABLE == true ]]; then
+    rm -rf "$w/Mods/Tech/Tacview"
+    cp -a /opt/dcs/Tacview/Mods/Tech/Tacview "$w/Mods/Tech/"
+    cp /opt/dcs/Tacview/Scripts/TacviewGameExport.lua "$w/Scripts/"
+    cp /opt/dcs/Tacview/Scripts/Hooks/TacviewGameGUI.lua "$w/Scripts/Hooks/"
+    mkdir -p "$w/Tacview"
+    log "tacview: recording to $w/Tacview (realtime telemetry: ${TACVIEW_REALTIME:-false})"
+  else
+    rm -rf "$w/Mods/Tech/Tacview" "$w/Scripts/TacviewGameExport.lua" "$w/Scripts/Hooks/TacviewGameGUI.lua"
+  fi
+  dcs-config tacview "$w/Config/options.lua"
+  if [[ $SRS_ENABLE == true ]]; then
+    cp /opt/dcs/hooks/SRSautoConnect.lua "$w/Scripts/Hooks/"
+  else
+    rm -f "$w/Scripts/Hooks/SRSautoConnect.lua"
+  fi
+}
+
+install_win_exe() {
+  # Z: (host filesystem) is removed from the prefix, so installers must run from C:
+  local src=$1 name
+  name=$(basename "$src")
+  shift
+  cp "$src" "$DRIVE_C/windows/temp/$name"
+  wine "C:\\windows\\temp\\$name" "$@" || log "$name exited with $?"
+  rm -f "$DRIVE_C/windows/temp/$name"
+}
+
+setup_dcssb() {
+  local bot=$DRIVE_C/DCSServerBot py=$DRIVE_C/Python venv=$DRIVE_C/dcssb-venv
+  local venv_py='C:\dcssb-venv\Scripts\python.exe'
+  if [[ ! -f $DRIVE_C/windows/system32/mfc140u.dll ]]; then
+    log "dcssb: installing VC++ 2015-2022 runtime (MFC for pywin32's win32ui)"
+    install_win_exe /opt/python-win/vc_redist.x64.exe /install /quiet /norestart
+  fi
+  if [[ $(cat "$py/.image-version" 2>/dev/null) != "$(cat /opt/python-win/version.txt)" ]]; then
+    log "dcssb: installing Windows Python $(cat /opt/python-win/version.txt)"
+    rm -rf "$py" "$venv"
+    install_win_exe /opt/python-win/python-installer.exe /quiet InstallAllUsers=0 'TargetDir=C:\Python' \
+      PrependPath=0 Include_test=0 Include_launcher=0 Include_doc=0 Shortcuts=0 AssociateFiles=0
+    [[ -f $py/python.exe ]] || { log "dcssb: Python install failed"; exit 1; }
+    cp /opt/python-win/version.txt "$py/.image-version"
+  fi
+  if [[ $(cat "$bot/.image-version" 2>/dev/null) != "$(cat /opt/dcsserverbot/.image-version)" ]]; then
+    log "dcssb: installing DCSServerBot $(cat /opt/dcsserverbot/.image-version)"
+    mkdir -p "$bot"
+    # code is replaced; config/ (incl. .secret) and runtime data are kept
+    cp -a /opt/dcsserverbot/. "$bot/"
+  fi
+  local req_hash
+  req_hash=$(sha256sum "$bot/requirements.txt" | cut -d' ' -f1)
+  if [[ $(cat "$venv/.requirements" 2>/dev/null) != "$req_hash" ]]; then
+    log "dcssb: creating virtualenv (about a minute)"
+    rm -rf "$venv"
+    wine 'C:\Python\python.exe' -m venv 'C:\dcssb-venv'
+    wine "$venv_py" -m pip install --disable-pip-version-check --no-input -q -r 'C:\DCSServerBot\requirements.txt'
+    echo "$req_hash" > "$venv/.requirements"
+  fi
+  # Wine has no usable UIAutomation typelib; keep pywinauto on its win32 backend.
+  sed -i 's/^    UIA_support = True$/    UIA_support = False  # dcs-server: no UIAutomation under Wine/' \
+    "$venv/Lib/site-packages/pywinauto/sysinfo.py"
+  dcs-config dcssb "$bot/config"
+}
+
+run_bot() {
+  remove_benchmark_files
+  setup_dcssb
+  cd "$DRIVE_C/DCSServerBot"
+  while true; do
+    log "dcssb: starting DCSServerBot (it starts and supervises DCS)"
+    # the bot needs a Windows console (GetConsoleMode); script(1) provides a pty for it
+    script -qfec "wine 'C:\\dcssb-venv\\Scripts\\python.exe' run.py -n '${DCSSB_NODE:-dcs}' -c config" /dev/null &
+    server_pid=$!
+    wait "$server_pid" || true
+    server_pid=
+    log "dcssb: bot exited; restarting in 10s"
+    sleep 10 &
+    wait $!
+  done
+}
+
 run_benchmark() {
   # Runs inside the server writedir: its saved login (network.vault) does not carry
   # over to other writedirs. Missions run back to back, then the files are removed.
@@ -256,7 +356,12 @@ main() {
       install_or_update
       apply_patches
       apply_server_settings
-      if [[ $DCS_MODE == benchmark ]]; then run_benchmark; else run_server; fi
+      if [[ $DCS_MODE == benchmark ]]; then
+        run_benchmark
+      else
+        install_tools
+        if [[ $DCSSB_ENABLE == true ]]; then run_bot; else run_server; fi
+      fi
       ;;
     *)
       log "unknown DCS_MODE=$DCS_MODE"

@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# SimpleRadio Standalone server sidecar. Config lives in the DCS writedir (SRS/server.cfg) so the
+# SRSautoConnect hook in DCS reads the same port.
+set -Eeuo pipefail
+: "${WINEPREFIX:=/data/wine}"
+: "${DCS_WRITEDIR:=DCS.server}"
+: "${SRS_PORT:=5002}"
+: "${SRS_EAM_BLUE_PASSWORD:=}"
+: "${SRS_EAM_RED_PASSWORD:=}"
+
+dir=$WINEPREFIX/drive_c/DCS_configs/$DCS_WRITEDIR/SRS
+cfg=$dir/server.cfg
+mkdir -p "$dir"
+[[ -f $cfg ]] || cp /opt/dcs/srs/server.cfg "$cfg"
+
+# Enforce the settings the deployment owns; everything else stays editable in server.cfg.
+set_key() {
+  local key=$1 value=$2
+  if grep -q "^${key}=" "$cfg"; then
+    sed -i "s|^${key}=.*|${key}=${value}|" "$cfg"
+  else
+    printf '%s=%s\n' "$key" "$value" >> "$cfg"
+  fi
+}
+set_key SERVER_PORT "$SRS_PORT"
+set_key SERVER_IP 0.0.0.0
+set_key UPNP_ENABLED false
+set_key CHECK_FOR_BETA_UPDATES false
+if [[ -n $SRS_EAM_BLUE_PASSWORD || -n $SRS_EAM_RED_PASSWORD ]]; then
+  set_key EXTERNAL_AWACS_MODE true
+  set_key EXTERNAL_AWACS_MODE_BLUE_PASSWORD "$SRS_EAM_BLUE_PASSWORD"
+  set_key EXTERNAL_AWACS_MODE_RED_PASSWORD "$SRS_EAM_RED_PASSWORD"
+fi
+
+echo "[srs-server] SRS $(cat /opt/srs/version.txt) on :$SRS_PORT, config $cfg"
+cd "$dir"
+exec /opt/srs/SRS-Server-Commandline -c "$cfg"
