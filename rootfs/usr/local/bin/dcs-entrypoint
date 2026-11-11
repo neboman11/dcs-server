@@ -185,8 +185,10 @@ for key, env, conv in (("name", "DCS_SERVER_NAME", lua_str),
     value = os.environ.get(env)
     if not value:
         continue
-    text, n = re.subn(r'(\["%s"\]\s*=\s*)[^\n]*?,' % key,
-                      lambda m: m.group(1) + conv(value) + ",", text, count=1)
+    # DCS writes ["key"] = ...; DCSServerBot rewrites the file as key = ... (top-level cfg keys
+    # sit one tab deep in both styles)
+    text, n = re.subn(r'(^\t(?:\["%s"\]|%s)\s*=\s*)[^\n]*?,' % (key, key),
+                      lambda m: m.group(1) + conv(value) + ",", text, count=1, flags=re.M)
     if n != 1:
         sys.exit(f"serverSettings.lua: key {key!r} not found")
 with open(path, "w", encoding="utf-8") as fh:
