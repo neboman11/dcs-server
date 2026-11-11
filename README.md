@@ -37,7 +37,7 @@ container; the entrypoint logs whether it is available.
 
 | Command | Purpose | Notes |
 |---|---|---|
-| `srs-server` | SimpleRadio Standalone server (native Linux build) | Config in `DCS.server/SRS/server.cfg`; `SRS_PORT` (5002), optional `SRS_EAM_BLUE_PASSWORD` / `SRS_EAM_RED_PASSWORD` |
+| `srs-server` | SimpleRadio Standalone server (native Linux build) | Config in `DCS.server/SRS/server.cfg`; `SRS_PORT` (5002), `SRS_COALITION_AUDIO_SECURITY` (false), optional `SRS_EAM_BLUE_PASSWORD` / `SRS_EAM_RED_PASSWORD` (enables External AWACS Mode) |
 | `samba-server` | SMB share `\\<host>\dcs` of the `DCS.server` writedir | Runs as root to authenticate, forces file access to uid 1000; needs `SMB_PASSWORD` (user `dcs`) |
 
 ## DCSServerBot under Wine

@@ -7,6 +7,7 @@ set -Eeuo pipefail
 : "${SRS_PORT:=5002}"
 : "${SRS_EAM_BLUE_PASSWORD:=}"
 : "${SRS_EAM_RED_PASSWORD:=}"
+: "${SRS_COALITION_AUDIO_SECURITY:=false}"  # only same-coalition clients hear each other (needed for EAM bots)
 
 dir=$WINEPREFIX/drive_c/DCS_configs/$DCS_WRITEDIR/SRS
 cfg=$dir/server.cfg
@@ -26,6 +27,7 @@ set_key SERVER_PORT "$SRS_PORT"
 set_key SERVER_IP 0.0.0.0
 set_key UPNP_ENABLED false
 set_key CHECK_FOR_BETA_UPDATES false
+set_key COALITION_AUDIO_SECURITY "$SRS_COALITION_AUDIO_SECURITY"
 if [[ -n $SRS_EAM_BLUE_PASSWORD || -n $SRS_EAM_RED_PASSWORD ]]; then
   set_key EXTERNAL_AWACS_MODE true
   set_key EXTERNAL_AWACS_MODE_BLUE_PASSWORD "$SRS_EAM_BLUE_PASSWORD"
