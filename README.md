@@ -55,6 +55,13 @@ Windows console. Bot config (`main.yaml`, `nodes.yaml`, `servers.yaml`, `service
 2. Open noVNC on port 6080 and, when `DCS_server.exe` shows the login window, log in
    with the server's ED account and enable auto-login (creates `Config/network.vault`).
 
+## Test missions
+
+`missions/overlord_test.py` generates `Caucasus_Overlord_Test.miz` with pydcs (pinned commit in the
+script's usage line): an immortal E-3A "Overlord" orbiting over Kutaisi, F/A-18C client slots with
+COMM1 preset 1 on 251.000 AM (OverlordBot), and weapons-hold MiG-29As orbiting near Gudauta and
+Nalchik as bogey-dope targets.
+
 ## Credits
 
 Server watchdog, MissionScripting exploit mitigation, Lua hooks (FPSmon, NoErrPopup,
