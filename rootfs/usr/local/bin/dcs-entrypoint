@@ -263,11 +263,19 @@ setup_dcssb() {
     [[ -f $py/python.exe ]] || { log "dcssb: Python install failed"; exit 1; }
     cp /opt/python-win/version.txt "$py/.image-version"
   fi
-  if [[ $(cat "$bot/.image-version" 2>/dev/null) != "$(cat /opt/dcsserverbot/.image-version)" ]]; then
-    log "dcssb: installing DCSServerBot $(cat /opt/dcsserverbot/.image-version)"
+  # Release tag from the chart (tools.dcsserverbot.version), bumped there by service_update.
+  [[ -n ${DCSSB_VERSION:-} ]] || { log "dcssb: DCSSB_VERSION (release tag, e.g. v3.0.5.3) is required"; exit 1; }
+  if [[ $(cat "$bot/.release" 2>/dev/null) != "$DCSSB_VERSION" ]]; then
+    log "dcssb: installing DCSServerBot $DCSSB_VERSION"
+    local src
+    src=$(mktemp -d)
+    curl -fsSL "https://github.com/Special-K-s-Flightsim-Bots/DCSServerBot/archive/refs/tags/$DCSSB_VERSION.tar.gz" \
+      | tar -xz -C "$src" --strip-components=1
     mkdir -p "$bot"
     # code is replaced; config/ (incl. .secret) and runtime data are kept
-    cp -a /opt/dcsserverbot/. "$bot/"
+    cp -a "$src/." "$bot/"
+    rm -rf "$src"
+    echo "$DCSSB_VERSION" > "$bot/.release"
   fi
   local req_hash
   req_hash=$(sha256sum "$bot/requirements.txt" | cut -d' ' -f1)

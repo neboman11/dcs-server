@@ -19,8 +19,6 @@ ARG TACVIEW_EXPORT_SHA256=a41a35afb91530581865243bb976caee465fb92009baaa2a3554c0
 ARG TACVIEW_GUI_SHA256=b155f8c78bb22dff3b98de10d80a218ccb703ee9e56d556c4c4274ff9eb8d8f1
 ARG TACVIEW_README_SHA256=9e730448bc213807bc7588e5f0c6f6e70e0d16d258f2ab79e06681afe0150a5d
 # DCSServerBot runs under Wine on Windows Python (all compiled deps ship win_amd64 wheels).
-ARG DCSSB_VERSION=3.0.5.2
-ARG DCSSB_SHA256=cff1a210c21688eb324fc637b18b6f960ad673dada04cac85f6db260aedf4ca2
 ARG PYTHON_WIN_VERSION=3.14.10
 ARG PYTHON_WIN_SHA256=92480239264744fe0386a1bd8275786fefa126e3129e56a68e22b52c73329965
 # MFC (mfc140u.dll) for pywin32's win32ui, which DCSServerBot imports via pywinauto.
@@ -64,12 +62,7 @@ RUN set -e; a="https://raw.githubusercontent.com/ActiumDev/dcs-server-wine/${ACT
       "${TACVIEW_GUI_SHA256}" "$t/Scripts/Hooks/TacviewGameGUI.lua" \
       "${TACVIEW_README_SHA256}" "$t/README.md" | sha256sum -c -
 
-RUN mkdir -p /opt/dcsserverbot /opt/python-win \
- && curl -fsSL -o /tmp/dcssb.tgz "https://github.com/Special-K-s-Flightsim-Bots/DCSServerBot/archive/refs/tags/v${DCSSB_VERSION}.tar.gz" \
- && echo "${DCSSB_SHA256}  /tmp/dcssb.tgz" | sha256sum -c - \
- && tar -xzf /tmp/dcssb.tgz -C /opt/dcsserverbot --strip-components=1 \
- && echo "${DCSSB_VERSION}" > /opt/dcsserverbot/.image-version \
- && rm /tmp/dcssb.tgz \
+RUN mkdir -p /opt/python-win \
  && curl -fsSL -o /opt/python-win/python-installer.exe "https://www.python.org/ftp/python/${PYTHON_WIN_VERSION}/python-${PYTHON_WIN_VERSION}-amd64.exe" \
  && echo "${PYTHON_WIN_SHA256}  /opt/python-win/python-installer.exe" | sha256sum -c - \
  && echo "${PYTHON_WIN_VERSION}" > /opt/python-win/version.txt \
