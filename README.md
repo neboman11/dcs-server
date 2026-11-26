@@ -27,6 +27,7 @@ Deployed by [argocd-definitions](https://github.com/neboman11/argocd-definitions
 | `TACVIEW_ENABLE` / `TACVIEW_REALTIME` / `TACVIEW_REALTIME_PORT` / `TACVIEW_REALTIME_PASSWORD` | `false` / `false` / `42674` / empty | Server-side Tacview recording to `DCS.server/Tacview` and optional live telemetry; settings are written into `Config/options.lua` on start |
 | `SRS_ENABLE` | `false` | Install the SRS autoconnect hook (SRS itself runs as the `srs-server` sidecar) |
 | `DCSSB_ENABLE` | `false` | Run DCSServerBot (Windows Python under Wine) instead of the watchdog; it starts and supervises DCS. Needs `DISCORD_TOKEN`, `DISCORD_GUILD_ID`, `DISCORD_OWNER_ID`, `DCSSB_DATABASE_URL`; `DCSSB_VERSION` (release tag, e.g. `v3.0.5.3`; installed into the prefix at start when it changes); optional `DCSSB_CHANNEL_STATUS/CHAT/ADMIN`, `DCSSB_NODE` |
+| `DCSSB_RESTAPI_KEY` / `DCSSB_RESTAPI_PORT` | empty / `9876` | With a key: enable DCSServerBot's RestAPI plugin and an API-only WebService on the port; every caller needs the key (header `X-API-Key`), non-private networks are refused |
 | `DCS_WATCHDOG_MAX_FAILURES` | `8` | Consecutive missed or error WebGUI responses (15 s apart) before the server is restarted |
 | `BENCHMARK_MISSIONS` / `BENCHMARK_ROUNDS` / `BENCHMARK_RUNTIME` | all three ActiumDev missions / `3` / `180` | Benchmark mode: missions (space-separated) run back to back inside the logged-in writedir, then the benchmark files are removed and the container idles |
 

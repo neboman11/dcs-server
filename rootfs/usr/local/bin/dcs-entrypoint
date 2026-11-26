@@ -289,6 +289,25 @@ setup_dcssb() {
   # Wine has no usable UIAutomation typelib; keep pywinauto on its win32 backend.
   sed -i 's/^    UIA_support = True$/    UIA_support = False  # dcs-server: no UIAutomation under Wine/' \
     "$venv/Lib/site-packages/pywinauto/sysinfo.py"
+  # Upstream sends deleteMenu with groupID None for players without a group (spectators, mission
+  # load) and commands.lua:1297 fails concatenating nil; skip it like the other menu plugins do.
+  python3 - "$bot/plugins/mission/listener.py" <<'PY'
+import sys
+from pathlib import Path
+path = Path(sys.argv[1])
+old = ('        await server.send_to_dcs({\n'
+       '            "command": "deleteMenu",\n'
+       '            "groupID": player.group_id\n'
+       '        })\n')
+new = ('        if player.group_id:  # dcs-server: no group, no menu to delete\n'
+       '            await server.send_to_dcs({\n'
+       '                "command": "deleteMenu",\n'
+       '                "groupID": player.group_id\n'
+       '            })\n')
+text = path.read_text(encoding="utf-8")
+if old in text:
+    path.write_text(text.replace(old, new, 1), encoding="utf-8")
+PY
   dcs-config dcssb "$bot/config"
 }
 

@@ -103,13 +103,35 @@ def dcssb(config_dir):
         sys.exit("DCSSB_DATABASE_URL must be set")
     channel = lambda name: int(env(f"DCSSB_CHANNEL_{name}", "-1") or -1)
 
-    dump(cfg / "main.yaml", {
+    api_key = env("DCSSB_RESTAPI_KEY")
+    main = {
         "guild_id": int(env("DISCORD_GUILD_ID")),
         "autoupdate": False,          # the image pins the bot version
         "use_dashboard": False,       # no TTY in a container
         "database": {"url": db_url},
         "logging": {"loglevel": env("DCSSB_LOGLEVEL", "INFO")},
-    })
+    }
+    if api_key:
+        # REST API only (no admin console): DCC ends missions and uploads/loads them through it.
+        # Every caller needs the key, loopback included, and nothing outside private networks.
+        main["opt_plugins"] = ["restapi"]
+        dump(cfg / "services" / "webservice.yaml", {"DEFAULT": {
+            "listen": "0.0.0.0",
+            "port": int(env("DCSSB_RESTAPI_PORT", "9876")),
+            "frontend": False,
+        }})
+        dump(cfg / "plugins" / "restapi.yaml", {"DEFAULT": {
+            "auth": {"api_key": api_key},
+            "security": {
+                "trusted": ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"],
+                "default": {"local": "api_key", "trusted": "api_key", "remote": "disabled"},
+            },
+        }})
+        (cfg / "plugins" / "restapi.yaml").chmod(0o600)
+    else:
+        for stale in (cfg / "services" / "webservice.yaml", cfg / "plugins" / "restapi.yaml"):
+            stale.unlink(missing_ok=True)
+    dump(cfg / "main.yaml", main)
     bot = {
         "owner": int(env("DISCORD_OWNER_ID")),
         "privileged_intents": True,
